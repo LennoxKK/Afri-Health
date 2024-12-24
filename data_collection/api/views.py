@@ -1,26 +1,5 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
-
-from rest_framework.parsers import JSONParser
-
-# class DataReceivingView(APIView):
-#     permission_classes = [IsAuthenticated]
-
-#     def post(self, request):
-#         print(f"Raw data: {request.body}")  # Debugging raw request payload
-#         try:
-#             print(f"Parsed JSON data: {request.data}")  # Debugging parsed request data
-#             data = request.data.get('data')
-#             print(f"Extracted data: {data}")
-#             print(f"Authenticated user: {request.user}")
-#         except Exception as e:
-#             print(f"Error while accessing data: {e}")
-#         return Response({'message': 'Data received successfully'}, status=200)
-    
-#     # views.py
-
-# In views.py
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -79,19 +58,18 @@ class FrontEndData(APIView):
         
         try:
             COUNT_ITEM = 0
-            HEADER_ITEM = []
+            HEADER_ITEM =None
             for item in data:
                 # Validate data format
-                if COUNT_ITEM == 0:
+                if HEADER_ITEM== None:
                     # Get the header
-                    HEADER_ITEM.append(item)
-                    COUNT_ITEM =1
-                if item not in HEADER_ITEM:
-                    if not HEADER_ITEM[0].get('topic') or not item.get('answer') or not item['answer'].get('question') or not item['answer'].get('answer'):
+                    HEADER_ITEM =item
+                if item != HEADER_ITEM:
+                    if not HEADER_ITEM.get('topic') or not item.get('answer') or not item['answer'].get('question') or not item['answer'].get('answer'):
                         return Response({"error": "Invalid data format or missing fields."}, status=status.HTTP_400_BAD_REQUEST)
 
                     # Geolocation handling
-                    location_data = HEADER_ITEM[0].get('location', {})
+                    location_data = HEADER_ITEM.get('location', {})
                     if not isinstance(location_data, dict):
                         location_data = {}  # Ensure it's a dictionary
 
@@ -109,14 +87,14 @@ class FrontEndData(APIView):
                         print(f"Geocoding error: {geocode_error}")
 
                     # Create models directly
-                    topic = HEADER_ITEM[0]['topic']
+                    topic = HEADER_ITEM['topic']
                     category, _ = Category.objects.get_or_create(name=topic)
                     answer_data = item['answer']
                     question_text = answer_data['question']
                     question = Question.objects.create(text=question_text, category=category)
                     answer_text = answer_data['answer']
                     option = Option.objects.create(text=answer_text, question=question)
-
+                    print(item)
                     # Save user response
                     UserResponse.objects.create(
                         user=user,
