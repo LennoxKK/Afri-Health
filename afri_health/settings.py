@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 """
 
 from pathlib import Path
+import os
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -23,7 +24,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-6a==bmkz%r%u11ntbag7)g!esp!#)q##8jvv@%_v7#rwu3sos5'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = False
 
 ALLOWED_HOSTS = ['goshawk-possible-humpback.ngrok-free.app','127.0.0.1']
 
@@ -190,3 +191,6 @@ SIMPLE_JWT = {
 }
 
 AUTH_USER_MODEL = 'data_collection.User'
+
+MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'uploads')

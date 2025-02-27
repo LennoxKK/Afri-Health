@@ -1,112 +1,129 @@
+import logging
 from rest_framework.views import APIView
+from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
-from rest_framework.views import APIView
-from rest_framework.response import Response
+from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
-from rest_framework import generics, permissions, status, serializers
-from data_collection.models import User  # Ensure the custom User model is imported
-from .serializers import UserSerializer
+from rest_framework import generics
+from rest_framework.pagination import PageNumberPagination
+from geopy.geocoders import Nominatim
+from .models import User, Category, Question, Option, Response as UserResponse
+from .serializers import UserSerializer, QuestionSerializer
+import assemblyai as aai
+
+# Configure logging
+logger = logging.getLogger(__name__)
+
+# Set AssemblyAI API key
+aai.settings.api_key = "bb9f8d48267b4a0e94cde53e9b0fcda8"  # Replace with your AssemblyAI API key
+
+# Initialize geolocator
+geolocator = Nominatim(user_agent="afri_health")
 
 class UserListView(generics.ListAPIView):
-    permission_classes = [permissions.IsAuthenticated]  # Require authentication to access this endpoint
+    permission_classes = [IsAuthenticated]
     serializer_class = UserSerializer
-
-    def get_queryset(self):
-        return User.objects.all()  # Return all users
-
-from rest_framework import generics, permissions
-from rest_framework.pagination import PageNumberPagination
-from .serializers import QuestionSerializer
-from .models import Question, Category
+    queryset = User.objects.all()
 
 class QuestionListView(generics.ListAPIView):
-    permission_classes = [permissions.IsAuthenticated]  # Require authentication to access this endpoint
+    permission_classes = [IsAuthenticated]
     serializer_class = QuestionSerializer
-    pagination_class = PageNumberPagination  # Add pagination for large datasets
+    pagination_class = PageNumberPagination
 
     def get_queryset(self):
-        # Get all questions by default
         queryset = Question.objects.all()
-        print(queryset)
-
-        # Filter based on query parameters (e.g., category)
-        category_name = self.request.query_params.get('category', None)
+        category_name = self.request.query_params.get('category')
         if category_name:
-            # Get the category object from the name, and filter questions by category
             category = Category.objects.filter(name=category_name).first()
             if category:
                 queryset = queryset.filter(category=category)
             else:
-                queryset = queryset.none()  # No questions if category is not found
-        print(queryset)
+                queryset = queryset.none()
         return queryset
 
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-from geopy.geocoders import Nominatim
-from .models import Category, Question, Option, Response as UserResponse
+class AudioUploadView(APIView):
+    parser_classes = (MultiPartParser, FormParser)
 
+    def post(self, request, *args, **kwargs):
+        audio_file = request.FILES.get('audio')
+        if not audio_file:
+            logger.error("No audio file provided in the request")
+            return Response({"error": "No audio file provided"}, status=status.HTTP_400_BAD_REQUEST)
 
+        try:
+            # Transcribe the audio file using AssemblyAI
+            transcriber = aai.Transcriber()
+            transcript = transcriber.transcribe(audio_file)
+            transcription_text = transcript.text
+            logger.info("Audio file transcribed successfully using AssemblyAI")
+
+            # Return the response with the transcribed text
+            return Response({
+                "message": "File uploaded and transcribed successfully",
+                "transcribed_text": transcription_text,
+            }, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            logger.error(f"Error processing audio file: {str(e)}")
+            return Response({"error": f"Failed to process audio file: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class FrontEndData(APIView):
+    permission_classes = [IsAuthenticated]
+
     def post(self, request, *args, **kwargs):
         data = request.data
-        # print((data))
         user = request.user
-        geolocator = Nominatim(user_agent="afri_health")
-        
+
         try:
-            COUNT_ITEM = 0
-            HEADER_ITEM =None
-            for item in data:
-                # Validate data format
-                if HEADER_ITEM== None:
-                    # Get the header
-                    HEADER_ITEM =item
-                if item != HEADER_ITEM:
-                    if not HEADER_ITEM.get('topic') or not item.get('answer') or not item['answer'].get('question') or not item['answer'].get('answer'):
-                        return Response({"error": "Invalid data format or missing fields."}, status=status.HTTP_400_BAD_REQUEST)
+            if not data:
+                return Response({"error": "No data provided"}, status=status.HTTP_400_BAD_REQUEST)
 
-                    # Geolocation handling
-                    location_data = HEADER_ITEM.get('location', {})
-                    if not isinstance(location_data, dict):
-                        location_data = {}  # Ensure it's a dictionary
+            header_item = data[0]
+            if not header_item:
+                return Response({"error": "Invalid data format or missing header."}, status=status.HTTP_400_BAD_REQUEST)
 
-                    lat = location_data.get('lat')
-                    lon = location_data.get('long')
-                    
-                    place_name = None
+            topic = header_item.get('topic')
+            if not topic:
+                return Response({"error": "Topic is required in the header."}, status=status.HTTP_400_BAD_REQUEST)
 
-                    try:
-                        if lat and lon:
-                            location = geolocator.reverse((lat, lon), exactly_one=True)
-                            place_name = location.address if location else None
-                    except Exception as geocode_error:
-                        place_name = None  # Default to None if geocoding fails
-                        print(f"Geocoding error: {geocode_error}")
+            category, _ = Category.objects.get_or_create(name=topic)
+            location_data = header_item.get('location', {})
+            lat = location_data.get('lat')
+            lon = location_data.get('long')
+            place_name = self._get_place_name(lat, lon)
 
-                    # Create models directly
-                    topic = HEADER_ITEM['topic']
-                    category, _ = Category.objects.get_or_create(name=topic)
-                    answer_data = item['answer']
-                    question_text = answer_data['question']
-                    question = Question.objects.create(text=question_text, category=category)
-                    answer_text = answer_data['answer']
-                    option = Option.objects.create(text=answer_text, question=question)
-                    print(item)
-                    # Save user response
-                    UserResponse.objects.create(
-                        user=user,
-                        question=question,
-                        selected_option=option,
-                        location=place_name
-                    )
-                
-            
+            for item in data[1:]:
+                answer_data = item.get('answer')
+                if not answer_data:
+                    continue
+
+                question_text = answer_data.get('question')
+                answer_text = answer_data.get('answer')
+                if not question_text or not answer_text:
+                    continue
+
+                question = Question.objects.create(text=question_text, category=category)
+                option = Option.objects.create(text=answer_text, question=question)
+                UserResponse.objects.create(
+                    user=user,
+                    question=question,
+                    selected_option=option,
+                    location=place_name
+                )
+
             return Response({"message": "Responses saved successfully."}, status=status.HTTP_201_CREATED)
-        
+
         except Exception as e:
-            import traceback
-            traceback.print_exc()
+            logger.error(f"Error saving responses: {str(e)}")
             return Response({"error": f"An unexpected error occurred: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def _get_place_name(self, lat, lon):
+        if not lat or not lon:
+            return None
+
+        try:
+            location = geolocator.reverse((lat, lon), exactly_one=True)
+            return location.address if location else None
+        except Exception as e:
+            logger.error(f"Geocoding error: {str(e)}")
+            return None

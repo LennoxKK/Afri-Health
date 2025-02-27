@@ -43,3 +43,4 @@ class Response(models.Model):
 
     def __str__(self):
         return f"{self.user} - {self.question} - {self.selected_option} - {self.location}"
+
